@@ -4,10 +4,10 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class BackendScrapifyApplication {
+public class ScrapifyApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(BackendScrapifyApplication.class, args);
+		SpringApplication.run(ScrapifyApplication.class, args);
 	}
 
 }
