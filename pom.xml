@@ -12,7 +12,7 @@
     <artifactId>backend-scrapify</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>backend-scrapify</name>
-    <description>Spring Boot &amp; Selenium-based web scraping application</description>
+    <description>Spring Boot and Selenium-based web scraping application</description>
     <url/>
     <licenses>
         <license/>
@@ -51,12 +51,17 @@
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
-            <version>4.28.1</version>
+            <version>4.29.0</version>
         </dependency>
         <dependency>
             <groupId>com.opencsv</groupId>
             <artifactId>opencsv</artifactId>
             <version>5.5.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.mashape.unirest</groupId>
+            <artifactId>unirest-java</artifactId>
+            <version>1.4.9</version>
         </dependency>
     </dependencies>
 
