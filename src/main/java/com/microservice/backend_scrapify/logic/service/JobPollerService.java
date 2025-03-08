@@ -1,18 +1,19 @@
 package com.microservice.backend_scrapify.logic.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mashape.unirest.http.HttpResponse;
-import com.mashape.unirest.http.Unirest;
 import com.microservice.backend_scrapify.modelRequest.ScrapifyJobs;
-import com.microservice.backend_scrapify.modelResponce.ScrapifyJobStatusResponse;
-import com.microservice.backend_scrapify.modelResponce.StatusResponse;
+import com.microservice.backend_scrapify.modelResponce.ScrapifyJobsListResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.Lifecycle;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
 @Service
-public class JobPollerService {
+public class JobPollerService implements Lifecycle {
 
     @Autowired
     private ScraperService scraperService;
@@ -20,28 +21,61 @@ public class JobPollerService {
     @Autowired
     private RestTemplate restTemplate;
 
-    public static final String PORTAL_NEXT_JOB_URL = "http://localhost:9001/scrapify/next-job";
+    private volatile boolean running = false;
+    private Thread pollerThread;
+    public static final String PORTAL_JOBS_URL = "http://localhost:9001/scrapify/get-jobs";
 
-    // Poll every 10 seconds
-    @Scheduled(fixedDelay = 10000)
-    public void pollJob() {
+    // Local job queue holding pending jobs from the portal.
+    private final Queue<ScrapifyJobs> jobQueue = new ConcurrentLinkedQueue<>();
+
+
+    // Start the poller when the application starts
+    @Override
+    public void start() {
+        running = true;
+        System.out.println("JobPollerService started.");
+    }
+
+    // Stop the poller
+    @Override
+    public void stop() {
+        running = false;
+        System.out.println("JobPollerService stopped.");
+    }
+
+    // Check if the poller is running
+    @Override
+    public boolean isRunning() {
+        return running;
+    }
+
+    // Fetch jobs from Scrapify Portal and add to the queue
+    @Scheduled(fixedDelay = 60000) // Every minute
+    public void fetchJobsFromPortal() {
         try {
-            // Use Unirest to GET the next job from the portal.
-            HttpResponse<String> response = Unirest.get(PORTAL_NEXT_JOB_URL).asString();
-            ScrapifyJobStatusResponse jobRequest = new ObjectMapper().readValue(response.getBody(), ScrapifyJobStatusResponse.class);
+            String response = restTemplate.getForObject(PORTAL_JOBS_URL, String.class);
+            ScrapifyJobsListResponse jobsListResponse = new ObjectMapper().readValue(response, ScrapifyJobsListResponse.class);
 
-            if (response.getStatus() == 200) {
-                if (jobRequest.getData() != null) {
-                    System.out.println("JOB_QUEUE---->" + jobRequest.getData());
-                    StatusResponse statusResponse = scraperService.processScrapifyJob(jobRequest.getData());
-                } else {
-                    System.out.println("No job returned from the portal.");
-                }
-            } else {
-                System.out.println("Portal returned non-200 status: " + response.getStatus());
+            if (Boolean.TRUE.equals(jobsListResponse.success) && jobsListResponse.getData() != null) {
+                jobQueue.addAll(jobsListResponse.data);
+                System.out.println("Added " + jobsListResponse.getData().size() + " jobs to the queue.");
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("Error fetching jobs: " + e.getMessage());
+        }
+    }
+
+    // Process jobs from the queue
+    @Scheduled(fixedDelay = 10000) // Every 10 seconds
+    public void processJobQueue() {
+        while (!jobQueue.isEmpty()) {
+            ScrapifyJobs job = jobQueue.poll();
+            if (job != null) {
+                boolean success = scraperService.scrapeChatGPT(job);
+                if (!success) {
+                    jobQueue.add(job); // Requeue failed jobs
+                }
+            }
         }
     }
 }

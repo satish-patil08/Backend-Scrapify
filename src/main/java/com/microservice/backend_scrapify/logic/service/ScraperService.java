@@ -1,23 +1,27 @@
 package com.microservice.backend_scrapify.logic.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microservice.backend_scrapify.commons.SequenceGeneratorService;
 import com.microservice.backend_scrapify.logic.entity.ScrapifyData;
 import com.microservice.backend_scrapify.logic.repository.ScrapifyRepository;
+import com.microservice.backend_scrapify.modelRequest.ChatGPTResponseData;
 import com.microservice.backend_scrapify.modelRequest.ScrapifyJobs;
-import com.microservice.backend_scrapify.modelResponce.StatusResponse;
+import io.github.bonigarcia.wdm.WebDriverManager;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+
 
 @Service
 public class ScraperService {
@@ -28,83 +32,114 @@ public class ScraperService {
     @Autowired
     private SequenceGeneratorService sequenceGeneratorService;
 
+    @Autowired
+    private WebDriver webDriver;
+
     private static final int MAX_RETRIES = 3;
-    private static final int MIN_RESULT_LENGTH = 10; // Minimum length for valid data
+    private static final int RESPONSE_WAIT_TIME = 20000;
+    private static final int RETRY_WAIT_TIME = 5000;
 
+    public boolean scrapeChatGPT(ScrapifyJobs scrapifyJobs) {
+        int retryCount = 0;
 
-    public StatusResponse processScrapifyJob(ScrapifyJobs jobRequest) {
-        try {
-            // Extract chromedriver from classpath to a temporary file
-            ClassPathResource resource = new ClassPathResource("chromedriver");
-            File chromeDriverFile = File.createTempFile("chromedriver", "");
-            try (InputStream is = resource.getInputStream()) {
-                Files.copy(is, chromeDriverFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
-            chromeDriverFile.setExecutable(true);
-            System.setProperty("webdriver.chrome.driver", chromeDriverFile.getAbsolutePath());
-        } catch (Exception e) {
-            return new StatusResponse(false, "Failed to set chromedriver: " + e.getMessage(), null);
-        }
+        while (retryCount < MAX_RETRIES) {
+            WebDriver webDriver = null;
+            try {
+                // Initialize WebDriver only if required
+                webDriver = initializeWebDriver();
 
-        // Setup ChromeOptions for headless mode.
-        ChromeOptions options = new ChromeOptions();
-        options.addArguments("--headless");
-        options.addArguments("--disable-gpu");
-        options.addArguments("--window-size=1920,1080");
+                System.out.println("Navigating to URL: " + scrapifyJobs.getUrl());
+                webDriver.get(URLDecoder.decode(scrapifyJobs.getUrl(), StandardCharsets.UTF_8));
 
-        WebDriver driver = new ChromeDriver(options);
-        String result = "";
-        boolean success = false;
-        int attempts = 0;
+                // Wait for page load
+                WebDriverWait wait = new WebDriverWait(webDriver, Duration.ofSeconds(30));
+                wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("prompt-textarea")));
 
-        try {
-            // Open the target URL.
-            driver.get(jobRequest.getUrl());
+                // Submit the prompt
+                WebElement inputField = webDriver.findElement(By.tagName("textarea"));
+                inputField.clear();
+                simulateHumanTyping(inputField, scrapifyJobs.getFinalPrompt());
+                inputField.submit();
 
-            while (attempts < MAX_RETRIES && !success) {
-                attempts++;
+                // Wait for the ChatGPT response
+                Thread.sleep(RESPONSE_WAIT_TIME);
+
+                // Extract the JSON content
+                WebElement jsonElement = webDriver.findElement(By.cssSelector("div.overflow-y-auto.p-4 code"));
+                String jsonText = jsonElement.getText();
+
+                if (jsonText.isEmpty()) {
+                    throw new RuntimeException("Empty JSON response.");
+                }
+
+                // Parse and save the data
+                saveScrapedData(scrapifyJobs, jsonText);
+
+                System.out.println("✅ Scraping successful: " + scrapifyJobs.getFinalPrompt());
+                return true;
+
+            } catch (Exception e) {
+                System.err.println("❌ Error during scraping attempt " + (retryCount + 1) + ": " + e.getMessage());
+                retryCount++;
                 try {
-                    // Locate the input field (update locator if necessary).
-                    WebElement inputBox = driver.findElement(By.id("searchBox"));
-                    inputBox.clear();
-                    inputBox.sendKeys(jobRequest.getFinalPrompt());
-                    inputBox.submit();
-
-                    // Wait for results to load.
-                    Thread.sleep(2000);
-
-                    // Extract the result (update locator if necessary).
-                    WebElement resultElement = driver.findElement(By.className("result-text"));
-                    result = resultElement.getText();
-
-                    if (result != null && result.length() >= MIN_RESULT_LENGTH) {
-                        success = true;
-                    }
-                } catch (Exception e) {
-                    // Optionally handle individual attempt errors here.
+                    Thread.sleep(RETRY_WAIT_TIME);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            } finally {
+                if (webDriver != null) {
+                    webDriver.quit(); // Ensure Chrome is closed after each attempt
                 }
             }
-        } catch (Exception e) {
-            driver.quit();
-            return new StatusResponse(false, "Error processing job: " + e.getMessage(), null);
-        } finally {
-            driver.quit();
         }
 
-        if (success) {
-            // Save the scraped data.
-            ScrapifyData data = new ScrapifyData(
-                    sequenceGeneratorService.getSequenceNumber(ScrapifyData.DATA_SCRAPPING_SEQUENCE),
-                    jobRequest.getCategory(),
-                    jobRequest.getUrl(),
-                    jobRequest.getFinalPrompt(),
-                    result
-            );
-            scrapifyRepository.save(data);
-            return new StatusResponse(true, "Scraping successful", data);
-        } else {
-            return new StatusResponse(false, "Scraping failed after " + attempts + " attempts", null);
+        System.err.println("❌ Scraping failed after " + MAX_RETRIES + " attempts.");
+        return false;
+    }
+
+    // Initialize WebDriver (Lazy loading)
+    private WebDriver initializeWebDriver() {
+        WebDriverManager.chromedriver().setup();
+        ChromeOptions options = new ChromeOptions();
+        options.addArguments(
+                "--start-maximized",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled"
+        );
+        options.setExperimentalOption("excludeSwitches", List.of("enable-automation"));
+        return new ChromeDriver(options);
+    }
+
+    // Simulate human-like typing
+    private void simulateHumanTyping(WebElement inputField, String text) throws InterruptedException {
+        for (char c : text.toCharArray()) {
+            inputField.sendKeys(String.valueOf(c));
+            Thread.sleep(100); // Human-like delay
         }
     }
 
+    // Parse JSON and save the scraped data
+    private void saveScrapedData(ScrapifyJobs scrapifyJobs, String jsonText) {
+        ChatGPTResponseData jsonData = parseChatGPTResponse(jsonText);
+        ScrapifyData data = new ScrapifyData(
+                sequenceGeneratorService.getSequenceNumber(ScrapifyData.DATA_SCRAPPING_SEQUENCE),
+                jsonText,
+                scrapifyJobs.getCategory(),
+                jsonData
+        );
+        scrapifyRepository.save(data);
+    }
+
+    // Parse JSON from ChatGPT response
+    private ChatGPTResponseData parseChatGPTResponse(String jsonText) {
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            return objectMapper.readValue(jsonText, ChatGPTResponseData.class);
+        } catch (Exception e) {
+            System.err.println("❌ Failed to parse JSON: " + e.getMessage());
+            return null;
+        }
+    }
 }

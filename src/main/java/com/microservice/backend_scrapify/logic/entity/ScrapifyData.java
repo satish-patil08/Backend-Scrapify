@@ -1,5 +1,6 @@
 package com.microservice.backend_scrapify.logic.entity;
 
+import com.microservice.backend_scrapify.modelRequest.ChatGPTResponseData;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Transient;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -12,20 +13,19 @@ public class ScrapifyData {
 
     @Id
     public Long id;
+    public String content; // Raw JSON response from ChatGPT
     public Long categoryId;
-    public String url;
-    public String prompt;
-    public String data;
+    public ChatGPTResponseData jsonData; // Custom model to store structured data
+
 
     public ScrapifyData() {
     }
 
-    public ScrapifyData(Long id, Long categoryId, String url, String prompt, String data) {
+    public ScrapifyData(Long id, String content, Long categoryId, ChatGPTResponseData jsonData) {
         this.id = id;
+        this.content = content;
         this.categoryId = categoryId;
-        this.url = url;
-        this.prompt = prompt;
-        this.data = data;
+        this.jsonData = jsonData;
     }
 
     public Long getId() {
@@ -36,6 +36,14 @@ public class ScrapifyData {
         this.id = id;
     }
 
+    public String getContent() {
+        return content;
+    }
+
+    public void setContent(String content) {
+        this.content = content;
+    }
+
     public Long getCategoryId() {
         return categoryId;
     }
@@ -44,38 +52,21 @@ public class ScrapifyData {
         this.categoryId = categoryId;
     }
 
-    public String getUrl() {
-        return url;
+    public ChatGPTResponseData getJsonData() {
+        return jsonData;
     }
 
-    public void setUrl(String url) {
-        this.url = url;
-    }
-
-    public String getPrompt() {
-        return prompt;
-    }
-
-    public void setPrompt(String prompt) {
-        this.prompt = prompt;
-    }
-
-    public String getData() {
-        return data;
-    }
-
-    public void setData(String data) {
-        this.data = data;
+    public void setJsonData(ChatGPTResponseData jsonData) {
+        this.jsonData = jsonData;
     }
 
     @Override
     public String toString() {
-        return "ScrapedData{" +
+        return "ScrapifyData{" +
                 "id=" + id +
+                ", content='" + content + '\'' +
                 ", categoryId=" + categoryId +
-                ", url='" + url + '\'' +
-                ", prompt='" + prompt + '\'' +
-                ", data='" + data + '\'' +
+                ", jsonData=" + jsonData +
                 '}';
     }
 }

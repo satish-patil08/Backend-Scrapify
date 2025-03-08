@@ -1,0 +1,4 @@
+[38767:38767:0308/180950.971742:INFO:chrome_browser_cloud_management_controller.cc(196)] No machine level policy manager exists.
+[38802:38802:0308/180951.086730:WARNING:sandbox_linux.cc(420)] InitializeSandbox() called with multiple threads in process gpu-process.
+[38802:38802:0308/180951.088717:WARNING:viz_main_impl.cc(85)] VizNullHypothesis is disabled (not a warning)
+[38767:38767:0308/181026.216071:ERROR:new_tab_page_handler.cc(1306)] NewTabPage loaded into a non-browser-tab context
